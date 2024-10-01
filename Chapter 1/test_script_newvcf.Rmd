@@ -1,0 +1,581 @@
+---
+title: "analyses of Pinctada margaritifera genomic structure in French Polynésia"
+author: "AO gradel & CMO reisser"
+date: '2023-06-20'
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+setwd("~/Desktop/pinctadapt/analyses_article1/")
+```
+
+```{r library and data loading, include=FALSE}
+#import all the library required for the analyses
+library(vcfR)
+library(dartR)
+library(geosphere)
+library(vegan)
+library(tidyverse)
+library(factoextra)
+library(emmeans)
+library(rstatix)
+library(ggpubr)
+library(radiator)
+library(poppr)
+```
+
+# Combining approaches to understand *Pinctada margaritifera* population structure and antropogenic impact in French Polynesia (genetic part)
+
+This document aim to concatenate all the results based on the data generate in chip sequencing. All the needed files are attached in the folder. The analyses will be perform with and without the Marquesas and Indonesia population wich correspond respectively o atypique and outgroup populations.
+
+```{r load the data and extract population from the ID, echo=FALSE}
+#First we will load the data and shape them in the different object class
+obj.vcf <- read.vcfR("chip_pinctadapt_data_cleaned_outgroup.vcf")
+obj.gl <- vcfR2genlight(obj.vcf)
+
+ID <- ((dimnames(obj.vcf@gt))[[2]])[-1]
+ID_df <- as.data.frame(ID)
+pop <- strsplit(as.character(ID_df$ID), split = "_")
+POP <- as.data.frame(t(as.data.frame(pop)))
+pop_list <- as.factor(POP$V1)
+pop(obj.gl) <- pop_list
+obj.glx <- gl.compliance.check(obj.gl)
+
+obj.gi <- gl2gi(obj.glx)
+
+table(pop(obj.gl))
+```
+
+## Genetic diversity (Fis, Ho, He, Ne)
+
+```{r general information FIS/Ho/He, echo=FALSE}
+
+data_heteroZ <- gl.report.heterozygosity(obj.glx, plot.out = FALSE)
+data_plotting <- as.data.frame(cbind(data_heteroZ$pop, data_heteroZ$Ho))
+archipelago <- ifelse(data_plotting$V1 == "AHE", "Tuamotus", data_plotting$V1)
+  archipelago <- ifelse(data_plotting$V1 == "ANA", "Tuamotus", archipelago)
+  archipelago <- ifelse(data_plotting$V1 == "ARA", "Tuamotus", archipelago)
+  archipelago <- ifelse(data_plotting$V1 == "AUQ", "Marquesas", archipelago)
+  archipelago <- ifelse(data_plotting$V1 == "GMBW", "Gambier", archipelago)
+  archipelago <- ifelse(data_plotting$V1 == "INDO", "Indonesia", archipelago)
+  archipelago <- ifelse(data_plotting$V1 == "KAT", "Tuamotus", archipelago)
+  archipelago <- ifelse(data_plotting$V1 == "KAU", "Tuamotus", archipelago)
+  archipelago <- ifelse(data_plotting$V1 == "MAN", "Tuamotus", archipelago)
+  archipelago <- ifelse(data_plotting$V1 == "MARS", "Gambier", archipelago)
+  archipelago <- ifelse(data_plotting$V1 == "MG", "Marquesas", archipelago)
+  archipelago <- ifelse(data_plotting$V1 == "MOP", "Society", archipelago)
+  archipelago <- ifelse(data_plotting$V1 == "MOR", "Gambier", archipelago)
+  archipelago <- ifelse(data_plotting$V1 == "MOT", "Tuamotus", archipelago)
+  archipelago <- ifelse(data_plotting$V1 == "MP", "Marquesas", archipelago)
+  archipelago <- ifelse(data_plotting$V1 == "RAR", "Tuamotus", archipelago)
+  archipelago <- ifelse(data_plotting$V1 == "R", "Autrales", archipelago)
+  archipelago <- ifelse(data_plotting$V1 == "SCI", "Society", archipelago)
+  archipelago <- ifelse(data_plotting$V1 == "TAH", "Tuamotus", archipelago)
+  archipelago <- ifelse(data_plotting$V1 == "TAK", "Tuamotus", archipelago)
+  archipelago <- ifelse(data_plotting$V1 == "TEA", "Tuamotus", archipelago)
+  archipelago <- ifelse(data_plotting$V1 == "TKP", "Tuamotus", archipelago)
+  archipelago <- ifelse(data_plotting$V1 == "UAH", "Marquesas", archipelago)
+  archipelago <- ifelse(data_plotting$V1 == "PEI", "Gambier", archipelago)
+  archipelago <- ifelse(data_plotting$V1 == "MAT", "Gambier", archipelago)
+  archipelago <- ifelse(data_plotting$V1 == "RIK", "Gambier", archipelago)
+
+```
+
+```{r individual information of heterozygotie, include=FALSE}
+data_heteroZ_ind <- gl.report.heterozygosity(obj.glx, method = "ind")
+data_heteroZ_ind <- as.data.frame(cbind(data_heteroZ_ind, pop=pop_list))
+
+archipelago_2 <- ifelse(data_heteroZ_ind$pop == "AHE", "Tuamotus", data_heteroZ_ind$pop)
+  archipelago_2 <- ifelse(data_heteroZ_ind$pop == "ANA", "Tuamotus", archipelago_2)
+  archipelago_2 <- ifelse(data_heteroZ_ind$pop == "ARA", "Tuamotus", archipelago_2)
+  archipelago_2 <- ifelse(data_heteroZ_ind$pop == "AUQ", "Marquesas", archipelago_2)
+  archipelago_2 <- ifelse(data_heteroZ_ind$pop == "GMBW", "Gambier", archipelago_2)
+  archipelago_2 <- ifelse(data_heteroZ_ind$pop == "KAT", "Tuamotus", archipelago_2)
+  archipelago_2 <- ifelse(data_heteroZ_ind$pop == "KAU", "Tuamotus", archipelago_2)
+  archipelago_2 <- ifelse(data_heteroZ_ind$pop == "MAN", "Tuamotus", archipelago_2)
+  archipelago_2 <- ifelse(data_heteroZ_ind$pop == "MARS", "Gambier", archipelago_2)
+  archipelago_2 <- ifelse(data_heteroZ_ind$pop == "MG", "Marquesas", archipelago_2)
+  archipelago_2 <- ifelse(data_heteroZ_ind$pop == "MOP", "Society", archipelago_2)
+  archipelago_2 <- ifelse(data_heteroZ_ind$pop == "MOR", "Gambier", archipelago_2)
+  archipelago_2 <- ifelse(data_heteroZ_ind$pop == "MOT", "Tuamotus", archipelago_2)
+  archipelago_2 <- ifelse(data_heteroZ_ind$pop == "MP", "Marquesas", archipelago_2)
+  archipelago_2 <- ifelse(data_heteroZ_ind$pop == "RAR", "Tuamotus", archipelago_2)
+  archipelago_2 <- ifelse(data_heteroZ_ind$pop == "R", "Australes", archipelago_2)
+  archipelago_2 <- ifelse(data_heteroZ_ind$pop == "SCI", "Society", archipelago_2)
+  archipelago_2 <- ifelse(data_heteroZ_ind$pop == "TAH", "Tuamotus", archipelago_2)
+  archipelago_2 <- ifelse(data_heteroZ_ind$pop == "TAK", "Tuamotus", archipelago_2)
+  archipelago_2 <- ifelse(data_heteroZ_ind$pop == "TEA", "Tuamotus", archipelago_2)
+  archipelago_2 <- ifelse(data_heteroZ_ind$pop == "TKP", "Tuamotus", archipelago_2)
+  archipelago_2 <- ifelse(data_heteroZ_ind$pop == "UAH", "Marquesas", archipelago_2)
+  archipelago_2 <- ifelse(data_heteroZ_ind$pop == "PEI", "Gambier", archipelago_2)
+  archipelago_2 <- ifelse(data_heteroZ_ind$pop == "MAT", "Gambier", archipelago_2)
+  archipelago_2 <- ifelse(data_heteroZ_ind$pop == "RIK", "Gambier", archipelago_2)
+  archipelago_2 <- ifelse(data_heteroZ_ind$pop == "INDO", "Indonesia", archipelago_2)
+
+data_heteroZ_ind <- as.data.frame(cbind(data_heteroZ_ind, archipelago=archipelago_2))
+
+```
+
+
+
+```{r plotting and statistique on observed heterozygotie}
+
+dataset <- data_heteroZ_ind %>%
+  reorder_levels(archipelago, order = c("Indonesia", "Marquesas", "Society", "Australes", "Tuamotus", "Gambier"))
+
+bxp <- ggplot(mapping = aes(dataset$archipelago, dataset$Ho, colour = dataset$archipelago)) +
+  geom_violin() +
+  geom_boxplot()
+
+pwc <- emmeans_test(dataset, Ho ~ archipelago, p.adjust.method = "bonferroni")
+pwc <- pwc %>% add_xy_position(x = "archipelago")
+bxp + 
+  stat_pvalue_manual(pwc, hide.ns = TRUE) +
+  theme(plot.title = element_text(color = "black", size = 14, hjust = 0.5),
+        plot.subtitle = element_text(color = "blue"),
+        plot.caption = element_text(color = "gray", face = "italic"),
+        legend.position = "none")+
+  labs(title = "Archipelago Observed heterozygoty comparison ",
+       caption = get_pwc_label(pwc))+
+  xlab("Archipelago")+
+  ylab("Observed heterozygotie")
+
+```
+
+Observed heterozygotie is a variable which estimate the genetic diversity. This diversity is influenced by numbers of past events. Here we observed a homogeneity of diversity in 4 of the 5 French Polynesian archipelagos. The fifth one the Marquesas Archipelago show the lowest diversity and inbetween the outgroups of Japan and Indonesia which are significantly different. *We have to take note of the lake of data in japan (n=4) and so maybe don't take this population in further analyses.
+
+```{r Ne estimation by archipelago}
+obj.gi.arch <- obj.gi
+pop(obj.gi.arch) <- archipelago_2
+loci <- poppr::missingno(obj.gi.arch, type = "loci", cutoff = 0.05, quiet = FALSE, freq = FALSE)
+loci.individuals <- poppr::missingno(loci, type = "geno", cutoff = 0.05, quiet = FALSE, freq = FALSE)
+loci.individuals.maf <- poppr::informloci(loci.individuals, cutoff = 2/nInd(loci.individuals), MAF = 0.05, quiet = FALSE)
+obj.gl.arch<- gi2gl(obj.gi.arch)
+LD.ne <- gl.LDNe(obj.gl.arch)
+write.table(LD.ne, "Ne_LD_method.txt",quote=FALSE)
+
+
+```
+
+
+
+## Global population structure 
+
+### Fst of Weir and Cockerham
+
+First of all we can use the most commune approach the Fstat (Fst). Fst goes from 0 to 1 and will estimate if the genetic variability is higher into or between 2 groups. For marine species Fst values are commonly small due to the important dispersion capacity induce by the open environment.
+
+```{r fst par îles, echo=FALSE}
+data_fst_test <- gl.fst.pop(obj.glx, verbose = 0)
+data_fst_test[["Fsts"]]
+
+```
+
+
+```{r fst par archipel, echo=FALSE}
+obj.gl.arch <- obj.gl
+pop(obj.gl.arch) <- dataset$archipelago
+obj.glx.arch <- gl.compliance.check(obj.gl.arch)
+
+data_fst_test_arch <- gl.fst.pop(obj.glx.arch, verbose = 0)
+data_fst_test_arch[["Fsts"]]
+
+```
+
+the Fsts show a clear genetic structure in our dataset. Indeed we have the Marquesas Archipelago wich show a value around 0.1 when it was compare to the rest of Polynesian archipelago. In contrary our outgroup, Indonesia, seems to be closer with a Fst around 0.07. Now with this observation in mind we choose to look at how algorithms will cluster the dataset and so create groups which are statically representative.
+
+### Representation of the genomic structure and statistical grouping
+
+In the goal of determine the different genetic units in French Polynesia we will perform an unsupervised discriminant analysis of principal components (DAPC). First with all individuals and in a second time a clusterisation center on the main Polynesian cluster.
+
+#### Clustering with all individuals except Japan
+
+```{r DAPC clustering and representation}
+#obj.gi.japan.out <- obj.gi[pop(obj.gi)!= "JAPJuv",]
+grp <- find.clusters(obj.gi, 
+                     max.n.clust = 28,
+                     n.pca = length(indNames(obj.gi))/3,
+                     choose.n.clust = FALSE,
+                     criterion = "min")
+# as we have a linear increase in PCA axes contribtion we can't choose and the manual indicate to use n/3
+table(Archipelago=pop(obj.gi), grp$grp)
+
+dapc1 <- dapc(obj.gi, grp$grp, n.pca = length(indNames(obj.gi))/3, n.da = 2)
+scatter(dapc1)
+
+percent= dapc1$eig/sum(dapc1$eig)*100
+barplot(percent, ylab="Percent of genetic variance explained by eigenvectors", names.arg=round(percent,2))
+percent
+
+```
+We can see with the plot and the table that the unsupervised clustering aim to generate 3 clusters, Marquesas archipelago, Polynesia and the outgroup Indonesia. Like with the Fst Indonesia semms to be closer to Indonesia than MArquesas population which is physically closer. Now in an exploitation perspective link to pearl farming activity we want to focus the clustering on th polynesian cluster. This action aim to eliminate the variation due to the isolations of the two other clusters and acces to a potential substructure.
+
+#### Clustering with only Polynesian cluster individuals
+
+```{r restricted DAPC clustering and representation}
+#first create the dataset and filtrate it
+tmp.obj.gi.PF <- obj.gi[archipelago_2 != "Marquesas",]
+tmp.obj.gi.PF <- tmp.obj.gi.PF[pop(tmp.obj.gi.PF) != "JAPJuv",]
+tmp.obj.gi.PF <- tmp.obj.gi.PF[pop(tmp.obj.gi.PF) != "WildJuvIndo",]
+obj.gl.PF <- gi2gl(tmp.obj.gi.PF)
+obj.gl.PF.filter1 <- gl.filter.callrate(obj.gl.PF,
+                                        method = "loc",
+                                        threshold = 0.95,
+                                        mono.rm = TRUE)
+obj.gl.PF.filter2 <- gl.filter.maf(obj.gl.PF.filter1, 
+                                   threshold = 0.05)
+obj.gi.PF <- gl2gi(obj.gl.PF.filter2)
+obj.gi.PF
+
+grp <- find.clusters(obj.gi.PF, 
+                     max.n.clust = 21,
+                     n.pca = length(indNames(obj.gi.PF))/3,
+                     stat = 'AIC',
+                     n.clust = 3)
+
+archipelago_PF <- archipelago_2[archipelago_2!="Japan"]
+archipelago_PF <- archipelago_PF[archipelago_PF!="Indonesia"]
+archipelago_PF <- archipelago_PF[archipelago_PF!="Marquesas"]
+
+table(Archipelago=archipelago_PF, grp$grp)
+table(Island=pop(obj.gi.PF), grp$grp)
+
+dapc1 <- dapc(obj.gi.PF,
+            grp$grp,
+            n.pca = length(indNames(obj.gi.PF))/3,
+            n.da = 2)
+scatter(dapc1)
+
+percent= dapc1$eig/sum(dapc1$eig)*100
+barplot(percent, ylab="Percent of genetic variance explained by eigenvectors", names.arg=round(percent,2))
+percent
+
+```
+
+It is difficult to choose the number of cluster here. But by running multiple time the find.cluster function we can choose n.clust=3 with the AIC values. when we look to the distribution of archipelagos into the clusters we can conclude to a substructure by archipelagos. Moreover if we increase the number of cluster according to the extreme of AIC we can choose 6 clusters 3 for tuamotus islands, 1 for society, 1 for gambier and the last one for Marutea Sud Island.
+
+### Clustering validation by AMOVA statistical test
+In a context of estimation of substructure signification we need to remove the archipelago with only one sample site wich introduce some bias un the stats ans interpretation 
+
+#### All samples from French Polynesia
+
+```{r PF.marq AMOVA analyses of global and substructure input shapping, include=FALSE}
+obj.gl.PF.marq <- obj.gl
+pop(obj.gl.PF.marq) <- archipelago_2
+obj.gl.PF.marq <- obj.gl.PF.marq[pop(obj.gl.PF.marq) != "Japan",]
+obj.gl.PF.marq <- obj.gl.PF.marq[pop(obj.gl.PF.marq) != "Indonesia",]
+obj.glx.PF.marq <- gl.filter.callrate(gl.compliance.check(obj.gl.PF.marq),
+                                     method = "loc",
+                                     threshold = 0.95,
+                                     mono.rm = TRUE)
+obj.glx.PF.marq <- gl.filter.maf(obj.glx.PF.marq,
+                                 threshold = 0.05)
+
+
+obj.genclone.PF.marq <- as.genclone(gl2gi(obj.glx.PF.marq))
+```
+
+```{r PF.marq AMOVA analyses of global and substructure strata shapping, echo=FALSE}
+
+island.PF.marq <- pop(obj.gl)[archipelago_2!= "Japan"]
+island.PF.marq <- as.character(island.PF.marq[island.PF.marq != "WildJuvIndo"])
+
+strata.df <- as.data.frame(cbind(archipelago_island=paste(pop(obj.genclone.PF.marq), island.PF.marq,sep="_"),
+                   archipelago = as.character(pop(obj.genclone.PF.marq)),
+                   island = island.PF.marq))
+
+strata(obj.genclone.PF.marq) <- strata.df
+obj.genclone.PF.marq
+```
+
+```{r PF.marq AMOVA analyses and test of significance}
+#PF.marq.amova <- poppr.amova(obj.genclone.PF.marq, ~archipelago/island)
+#save(PF.marq.amova, file = "amova.PF.marq.RData")
+
+load("amova.PF.marq.RData")
+PF.marq.amova
+
+PF.marq.amova.df <- as.data.frame(cbind( "Source of variation" = c("Among Archipelagos",
+                                                                "Among Islands within Arcipelagos",
+                                                                "Within Islands",
+                                                                "Total"),
+                                        "d.f." = PF.marq.amova$results$Df[-4],
+                                        "Fstatistic" = c("Fct", "Fsc", "Fst", ""),
+                                        "Fstat" = (PF.marq.amova$componentsofcovariance$`%`[-4])/100
+                                        ))
+load("amova_PF.marq_signif.RData")
+PF.marq.amova.df
+PF.marq.amova.signif
+
+```
+
+In regards of the computation time Iperform the permutation null test on DATARMOR with the following line to generate a Rdata object... style running
+In regards of the variance distribution, there is more genetic differences between archipelagos than within them. But like we can expect with bivalvia and their high genetic diversity the higher variantation is between samples themselves.
+We can also perform the amova on the cluster identify by the unsupervised DAPC clustering.
+
+#### AMOVA on the DAPC cluster on restricted polynesia
+
+```{r PF AMOVA analyses of global and substructure input shapping, include=FALSE}
+obj.gl.PF <- obj.gl #we restart from the beginning to be sure to not have the most relevant dataset
+pop(obj.gl.PF) <- archipelago_2
+obj.gl.PF <- obj.gl.PF[pop(obj.gl.PF) != "Japan",]
+obj.gl.PF <- obj.gl.PF[pop(obj.gl.PF) != "Indonesia",]
+obj.gl.PF <- obj.gl.PF[pop(obj.gl.PF) != "Marquesas",]
+
+obj.glx.PF <- gl.filter.callrate(gl.compliance.check(obj.gl.PF),
+                                     method = "loc",
+                                     threshold = 0.95,
+                                     mono.rm = TRUE)
+obj.glx.PF <- gl.filter.maf(obj.glx.PF,
+                                 threshold = 0.05)
+
+
+obj.genclone.PF <- as.genclone(gl2gi(obj.glx.PF))
+```
+
+```{r PF AMOVA analyses of global and substructure strata shapping, echo=FALSE}
+island.PF <- pop(obj.gl)[archipelago_2!= "Japan"]
+island.PF <- as.character(island.PF[island.PF != "WildJuvIndo"])
+island.PF <- as.character(island.PF[island.PF != "MG"])
+island.PF <- as.character(island.PF[island.PF != "MP"])
+island.PF <- as.character(island.PF[island.PF != "AUQ"])
+island.PF <- as.character(island.PF[island.PF != "UAH"])
+
+strata.df <- as.data.frame(cbind(archipelago_island=paste(pop(obj.genclone.PF), island.PF,sep="_"),
+                   archipelago = as.character(pop(obj.genclone.PF)),
+                   island = island.PF))
+
+strata(obj.genclone.PF) <- strata.df
+obj.genclone.PF
+```
+
+```{r PF AMOVA analyses and test of significance}
+#PF.amova <- poppr.amova(obj.genclone.PF, ~archipelago/island)
+#save(PF.amova, file = "amova.PF.RData")
+load("amova.PF.RData")
+PF.amova
+
+PF.amova.df <- as.data.frame(cbind( "Source of variation" = c("Among Archipelagos",
+                                                                "Among Islands within Arcipelagos",
+                                                                "Within Islands",
+                                                                "Total"),
+                                        "d.f." = PF.amova$results$Df[-4],
+                                        "Fstatistic" = c("Fct", "Fsc", "Fst", ""),
+                                        "Fstat" = (PF.amova$componentsofcovariance$`%`[-4])/100
+                                        ))
+
+
+load("amova_PF_signif.RData")
+PF.amova.df
+PF.amova.signif
+```
+### Admixture summary
+
+We perform analyses with admixture modelling on DATARMOR cluster and we estimate the number of K to choose in regards of the following plot generate via the software and some rcode.
+
+```{r, CV and K selection for the representation}
+CV_data <- read.csv("CV_values_admixture.txt", sep = "\t", dec = ",")
+ggplot(mapping = aes(x = CV_data$K, y = CV_data$value_all)) +
+  geom_line()+
+  geom_point()+
+  ggtitle("CV variation in all individuals admixture analyses")
+
+ggplot(mapping = aes(x = CV_data$K, y = CV_data$value_PF)) +
+  geom_line()+
+  geom_point()+
+  ggtitle("CV variation in PF cluster individuals admixture analyses")
+
+```
+With this two graph we can choose the best K for the two dataset. For all individuals I recommend to choose a K=3 or K=5 and for the PF data set I recommend a K between 1 and 3 due to the plateau.
+
+```{r, admixture all plotting, echo=FALSE}
+# Get individual names in the correct order and the desire population order
+labels<-as.data.frame(cbind(ID,as.character(pop_list)))
+populations_order <- "JAPJuv,WildJuvIndo,MG,MP,UAH,AUQ,SCI,MOP,AHE,MAN,TKP,ARA,KAU,RAR,ANA,KAT,TAH,MOT,TEA,TAK,RVV,MarSud,MOR,WC3,GMBW,WC1,WC2"
+# Name the columns
+names(labels)<-c("ind","pop")
+
+# Add a column with population indices to order the barplots
+# Use the order of populations provided as the fourth argument (list separated by commas)
+labels$n<-factor(labels$pop,levels=unlist(strsplit(populations_order,",")))
+levels(labels$n)<-c(1:length(levels(labels$n)))
+labels$n<-as.integer(as.character(labels$n))
+rep<-as.vector(table(labels$n))
+rep_pop <-0
+for (i in 1:length(levels(as.factor(labels$pop)))) {
+  rep_pop <- c(rep_pop,
+                  rep((as.vector(strsplit(populations_order,",")))[[1]][i],
+                      rep[i]))
+  }
+rep_pop_K3 <- rep(rep_pop[-1],3)
+rep_pop_K4 <- rep(rep_pop[-1],4)
+rep_pop_K5 <- rep(rep_pop[-1],5)
+
+# read in the different admixture output files
+directory_prefix <- "admixture_outgroup/chip_pinctadapt_data_cleaned_outgroup"
+minK=3
+maxK=5
+tbl<-lapply(minK:maxK, function(x) read.table(paste0(directory_prefix,".",x,".Q")))
+
+#K3
+K3_df <- as.data.frame(cbind(tbl[[1]][order(labels$n),],
+                             Categorie=1:dim(tbl[[1]])[1]))
+K3.df.long <- tidyr:: gather(K3_df, "Cluster", "Proportion", -Categorie)
+K3.df.long.pop <- as.data.frame(cbind(K3.df.long,
+                                      Population = factor(rep_pop_K3,
+                                                          levels = (as.vector(strsplit(populations_order,",")))[[1]])))
+
+
+K3 <- ggplot(K3.df.long.pop, aes(x=Categorie, y=Proportion, fill=Cluster))  + ylab("Assignment") +xlab("Population")
+K3 <- K3 + geom_bar(stat='identity',width=1)
+K3 <- K3 + scale_fill_manual(values = c("red","green","blue"),name="cluster") 
+K3 <- K3 + facet_grid(~K3.df.long.pop$Population, scales = "free")
+K3 <- K3 + theme_gray(base_size = 12) + guides(fill=guide_legend(ncol=1))
+K3 <- K3 + theme(axis.text.x = element_blank(),
+               axis.ticks = element_blank(),
+               panel.spacing.x=unit(0.1, "lines"))
+
+#K4
+K4_df <- as.data.frame(cbind(tbl[[2]][order(labels$n),],
+                             Categorie=1:dim(tbl[[2]])[1]))
+K4.df.long <- tidyr:: gather(K4_df, "Cluster", "Proportion", -Categorie)
+K4.df.long.pop <- as.data.frame(cbind(K4.df.long,
+                                      Population = factor(rep_pop_K4,
+                                                          levels = (as.vector(strsplit(populations_order,",")))[[1]])))
+
+
+K4 <- ggplot(K4.df.long.pop, aes(x=Categorie, y=Proportion, fill=Cluster))  + ylab("Assignment") +xlab("Population")
+K4 <- K4 + geom_bar(stat='identity',width=1)
+K4 <- K4 + scale_fill_manual(values = c("red","green","blue", "violet"),name="cluster") 
+K4 <- K4 + facet_grid(~K4.df.long.pop$Population, scales = "free")
+K4 <- K4 + theme_gray(base_size = 12) + guides(fill=guide_legend(ncol=1))
+K4 <- K4 + theme(axis.text.x = element_blank(),
+               axis.ticks = element_blank(),
+               panel.spacing.x=unit(0.1, "lines"))
+
+#K5
+K5_df <- as.data.frame(cbind(tbl[[3]][order(labels$n),],
+                             Categorie=1:dim(tbl[[3]])[1]))
+K5.df.long <- tidyr:: gather(K5_df, "Cluster", "Proportion", -Categorie)
+K5.df.long.pop <- as.data.frame(cbind(K5.df.long,
+                                      Population = factor(rep_pop_K5,
+                                                          levels = (as.vector(strsplit(populations_order,",")))[[1]])))
+
+
+K5 <- ggplot(K5.df.long.pop, aes(x=Categorie, y=Proportion, fill=Cluster))  + ylab("Assignment") +xlab("Population")
+K5 <- K5 + geom_bar(stat='identity',width=1)
+K5 <- K5 + scale_fill_manual(values = c("red","green","blue", "violet", "light blue"),name="cluster") 
+K5 <- K5 + facet_grid(~K5.df.long.pop$Population, scales = "free")
+K5 <- K5 + theme_gray(base_size = 12) + guides(fill=guide_legend(ncol=1))
+K5 <- K5 + theme(axis.text.x = element_blank(),
+               axis.ticks = element_blank(),
+               panel.spacing.x=unit(0.1, "lines"))
+
+admixture_all <- ggarrange(K3,K4,K5, ncol = 1, nrow = 3, labels = c("K=3",
+                                                                    "K=4",
+                                                                    "K=5"))
+
+admixture_all
+
+```
+
+```{r, admixture PF plotting, echo=FALSE}
+# Get individual names in the correct order and the desire population order
+labels<-as.data.frame(cbind(ID,as.character(pop_list)))
+# Name the columns
+names(labels)<-c("ind","pop")
+
+labels_PF <- labels[labels$pop != "JAPJuv" & 
+                      labels$pop != "WildJuvIndo" &
+                      labels$pop != "MG" &
+                      labels$pop != "MP" &
+                      labels$pop != "AUQ" &
+                      labels$pop != "UAH",]
+
+
+populations_order_PF <- "SCI,MOP,AHE,MAN,TKP,ARA,KAU,RAR,ANA,KAT,TAH,MOT,TEA,TAK,RVV,MarSud,MOR,WC3,GMBW,WC1,WC2"
+
+# Add a column with population indices to order the barplots
+# Use the order of populations provided as the fourth argument (list separated by commas)
+labels_PF$n<-factor(labels_PF$pop,levels=unlist(strsplit(populations_order_PF,",")))
+levels(labels_PF$n)<-c(1:length(levels(labels_PF$n)))
+labels_PF$n<-as.integer(as.character(labels_PF$n))
+rep<-as.vector(table(labels_PF$n))
+rep_pop_PF <-0
+for (i in 1:length(levels(as.factor(labels_PF$pop)))) {
+  rep_pop_PF <- c(rep_pop_PF,
+                  rep((as.vector(strsplit(populations_order_PF,",")))[[1]][i],
+                      rep[i]))
+  }
+rep_pop_K1_PF <- rep(rep_pop_PF[-1],1)
+rep_pop_K2_PF <- rep(rep_pop_PF[-1],2)
+rep_pop_K3_PF <- rep(rep_pop_PF[-1],3)
+
+# read in the different admixture output files
+directory_prefix <- "admixture_PF/chip_pinctadapt_data_cleaned_PF"
+minK=1
+maxK=3
+tbl<-lapply(minK:maxK, function(x) read.table(paste0(directory_prefix,".",x,".Q")))
+
+#K1_PF
+K1_PF_df <- as.data.frame(cbind(tbl[[1]][order(labels_PF$n),],
+                             Categorie=1:dim(tbl[[1]])[1]))
+K1_PF.df.long <- tidyr:: gather(K1_PF_df, "Cluster", "Proportion", -Categorie)
+K1_PF.df.long.pop <- as.data.frame(cbind(K1_PF.df.long,
+                                      Population = factor(rep_pop_K1_PF,
+                                                          levels = (as.vector(strsplit(populations_order_PF,",")))[[1]])))
+
+
+K1_PF <- ggplot(K1_PF.df.long.pop, aes(x=Categorie, y=Proportion, fill=Cluster))  + ylab("Assignment") +xlab("Population")
+K1_PF <- K1_PF + geom_bar(stat='identity',width=1)
+K1_PF <- K1_PF + scale_fill_manual(values = c("red","green","blue"),name="cluster") 
+K1_PF <- K1_PF + facet_grid(~K1_PF.df.long.pop$Population, scales = "free")
+K1_PF <- K1_PF + theme_gray(base_size = 12) + guides(fill=guide_legend(ncol=1))
+K1_PF <- K1_PF + theme(axis.text.x = element_blank(),
+               axis.ticks = element_blank(),
+               panel.spacing.x=unit(0.1, "lines"))
+
+#K2_PF
+K2_PF_df <- as.data.frame(cbind(tbl[[2]][order(labels_PF$n),],
+                             Categorie=1:dim(tbl[[2]])[1]))
+K2_PF.df.long <- tidyr:: gather(K2_PF_df, "Cluster", "Proportion", -Categorie)
+K2_PF.df.long.pop <- as.data.frame(cbind(K2_PF.df.long,
+                                      Population = factor(rep_pop_K2_PF,
+                                                          levels = (as.vector(strsplit(populations_order_PF,",")))[[1]])))
+
+
+K2_PF <- ggplot(K2_PF.df.long.pop, aes(x=Categorie, y=Proportion, fill=Cluster))  + ylab("Assignment") +xlab("Population")
+K2_PF <- K2_PF + geom_bar(stat='identity',width=1)
+K2_PF <- K2_PF + scale_fill_manual(values = c("red","green","blue", "violet"),name="cluster") 
+K2_PF <- K2_PF + facet_grid(~K2_PF.df.long.pop$Population, scales = "free")
+K2_PF <- K2_PF + theme_gray(base_size = 12) + guides(fill=guide_legend(ncol=1))
+K2_PF <- K2_PF + theme(axis.text.x = element_blank(),
+               axis.ticks = element_blank(),
+               panel.spacing.x=unit(0.1, "lines"))
+
+#K3_PF
+K3_PF_df <- as.data.frame(cbind(tbl[[3]][order(labels_PF$n),],
+                             Categorie=1:dim(tbl[[3]])[1]))
+K3_PF.df.long <- tidyr:: gather(K3_PF_df, "Cluster", "Proportion", -Categorie)
+K3_PF.df.long.pop <- as.data.frame(cbind(K3_PF.df.long,
+                                      Population = factor(rep_pop_K3_PF,
+                                                          levels = (as.vector(strsplit(populations_order_PF,",")))[[1]])))
+
+
+K3_PF <- ggplot(K3_PF.df.long.pop, aes(x=Categorie, y=Proportion, fill=Cluster))  + ylab("Assignment") +xlab("Population")
+K3_PF <- K3_PF + geom_bar(stat='identity',width=1)
+K3_PF <- K3_PF + scale_fill_manual(values = c("red","green","blue", "violet", "light blue"),name="cluster") 
+K3_PF <- K3_PF + facet_grid(~K3_PF.df.long.pop$Population, scales = "free")
+K3_PF <- K3_PF + theme_gray(base_size = 12) + guides(fill=guide_legend(ncol=1))
+K3_PF <- K3_PF + theme(axis.text.x = element_blank(),
+               axis.ticks = element_blank(),
+               panel.spacing.x=unit(0.1, "lines"))
+
+admixture_PF <- ggarrange(K1_PF,K2_PF,K3_PF, ncol = 1, nrow = 3, labels = c("K=1",
+                                                                    "K=2",
+                                                                    "K=3"))
+
+admixture_PF
+```
+
