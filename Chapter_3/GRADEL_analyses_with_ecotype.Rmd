@@ -1,0 +1,1439 @@
+---
+title: "anaalyses_physio_version2"
+author: "AO gradel"
+date: '2024-07-07'
+output: html_document
+---
+# Pinctadapt: Effect of intertidal thermic conditions on the mitochondrial physiologie of *Pinctada margaritifera*
+
+```{r setup, include=FALSE}
+library(ggplot2)
+library(MuMIn)
+library(glmmTMB)
+library(emmeans)
+library(DHARMa)
+library(effects)
+library(tidyr)
+library(tidyverse)
+library(ggpubr)
+library(nlme)
+library(car)
+library(cowplot)
+
+knitr::opts_knit$set(root.dir = "/Users/antoinegradel/Desktop/pinctadapt/écophysiologie/")
+```
+
+In order to perform the analyses of the physological measures perform during the intertidal stress a glmm (generalized linear mixed mmodel) approach as been choosed.
+the organisation of this report will be organized in 3 parts first the impact of the experimental setup on the growth of the individuals. Then we will look at the impact of the intertidal condition on the telomere dynamic of the individuals. to conclude we will focus on the mitochondiral traits explore by the quantity of intra-cell mitochondria density and the measure perform by the O2k oxygraph from oroboros compagny
+
+## Global metabolism impact (growth, respiration rate, ... )
+
+### Growth rate between experimental and stress condition
+```{r growth rate data download, include=FALSE}
+raw_data_growth <- read.table("./data_taille.txt",
+                header = TRUE,
+                sep = "\t",dec = ".", 
+                na.strings = "NA")
+
+
+data_shape_growth <- raw_data_growth %>%
+  mutate(Time = as.numeric(substr(raw_data_growth$Temps, 2, nchar(raw_data_growth$Temps)))) %>%
+  mutate(ecotype = as.character(substr(raw_data_growth$Family, 1, nchar(raw_data_growth$Family)-1))) %>%
+  mutate(Largeur = as.numeric(raw_data_growth$Largeur))
+
+data_shape_growth$ecotype[data_shape_growth$ecotype == "I"] <- "intertidal"
+data_shape_growth$ecotype[data_shape_growth$ecotype == "S"] <- "subtidal"
+
+data_growth_restricted_tmp <- data_shape_growth[,c(12,5,7,11,13,4)]
+tmp <- data_growth_restricted_tmp[data_growth_restricted_tmp$Time == 0,]
+tmp_t <- tmp %>%
+  mutate(Bac ="Temoin") %>%
+  mutate(Mesure = "Initialising")
+data_growth_restricted <- rbind(tmp, tmp_t, data_growth_restricted_tmp[data_growth_restricted_tmp$Time >= 21,])
+
+rm(tmp, tmp_t,data_growth_restricted_tmp)
+
+```
+
+When we think about modeling we want to know if there is differences first an impact of stressful condition and them if there is differences between ecotypes along the time. Nevertheless we would ignore an effect induce by a family effect.
+
+```{r growth rate statistic}
+data_growth_restricted_clean <- na.omit(data_growth_restricted)
+f1 <- formula(Largeur~Time*ecotype*Bac)
+M1_gr<-gls(f1,method="REML", 
+           data = data_growth_restricted, na.action=na.omit)
+M2_gr <- lme(f1, 
+             random = ~1 | Family, 
+             data = data_growth_restricted, method="REML", na.action=na.omit)
+anova(M1_gr, M2_gr)
+
+#effet famille significatif
+
+M3_gr <- lme(f1, random = ~1 | Family, 
+             data = data_growth_restricted_clean, method="ML")
+
+d_M3 <- dredge(M3_gr) # test toutes les comparaisons
+d_M3
+
+# modèle final
+M3_gr<- lme(Largeur ~ Bac*Time+ecotype, random = ~1 | Family, 
+         data = data_growth_restricted_clean, method="REML",na.action=na.omit)
+
+res <- residuals(M3_gr, type="normalized")
+fitted <- fitted(M3_gr)
+resfit <- bind_cols(res = res,
+                    fit = fitted,
+)
+
+plot_grid(nrow = 2, ncol = 2,
+          ggplot(as_tibble(res), aes(x = res)) +
+            geom_histogram(bins = 50,
+                           fill = "lightblue", color = "black")+
+            labs(title = "Histogramme des residus"),
+          ggplot(as_tibble(res), aes(sample = res)) +
+            stat_qq() +
+            stat_qq_line()+
+            labs(title = "Normal Q-Q Plot"),
+          ggplot(resfit, aes(y = res, x = fit)) +
+            geom_point()+
+            labs(title = "Valeurs ajustees"))
+# interprétation du modèle
+
+Anova(M3_gr, type = "III")
+
+summary(M3_gr)
+
+r.squaredGLMM(M3_gr)
+
+emm_conso <- emmeans(M3_gr, pairwise ~ Bac * Time + ecotype)
+print(summary(emm_conso))
+
+```
+
+```{r growth plotting, echo=FALSE, fig.width=15, fig.height=10}
+data_growth_restricted_clean$f_time <- data_growth_restricted_clean$Time
+data_growth_restricted_clean$f_time[data_growth_restricted_clean$f_time <= 10 ] <- 0
+data_growth_restricted_clean$f_time[data_growth_restricted_clean$f_time >= 10 & 
+                                      data_growth_restricted_clean$f_time <= 30] <- 21
+data_growth_restricted_clean$f_time[data_growth_restricted_clean$f_time >= 30] <- 42
+
+data_growth_restricted_clean$Bac[data_growth_restricted_clean$Bac == "experimental"] <- "Fluctuating"
+data_growth_restricted_clean$Bac[data_growth_restricted_clean$Bac >= "Temoin"] <- "Control"
+
+ggplot(data = data_growth_restricted_clean, aes(x = Time, y = Largeur,
+                                  col = ecotype))+
+  facet_wrap(~Bac) +
+  geom_boxplot(aes(x = as.factor(f_time), y = Largeur,
+                                  col = ecotype))+
+  geom_smooth(aes(x = (Time/21)+1, y = Largeur,
+                                  col = ecotype), method = "glm", se = TRUE)+
+  stat_regline_equation(
+    aes(label =  paste(..eq.label.., ..adj.rr.label.., sep = "~~~~")),
+     size=6)+
+  theme_light() +
+  theme(axis.title=element_text(size=16, colour="black"),
+        axis.title.x=element_text(size=16, colour="black", vjust=-0.1),
+        axis.title.y=element_text(size=16, colour="black"),
+        axis.text.x = element_text(size=12, colour="black"),
+        axis.text.y = element_text(size=12, colour="black"),
+        strip.text.x = element_text(size=16, colour="black"),
+        plot.title = element_text(size=16, colour="black"),
+        legend.title = element_blank(),
+        legend.text = element_text(size=16, colour="black"),
+        legend.background = element_rect(fill = NA , colour = NA),
+        legend.position = "bottom")+
+  xlab("Time (days)")+
+  ylab("Hinge length (mm)")
+
+```
+### Consommation en algue
+```{r conso statistic}
+data_conso <- read.table("~/Desktop/pinctadapt/écophysiologie/consommation_phase_chaude.txt", header = TRUE, dec="," )
+data_conso$date <- as.Date(data_conso$date, format = "%d/%m/%Y")
+
+data_conso_clean <- na.omit(data_conso)
+
+f11 <- formula(perc_vol~date*ecotype)
+f12 <- formula(entree_vol~date*ecotype)
+M1_conso<-gls(f11,method="REML", 
+           data = data_conso_clean, na.action=na.omit)
+M2_conso <- lme(f11, 
+             random = ~1 | famille, 
+             data = data_conso_clean, method="REML", na.action=na.omit)
+anova(M1_conso, M2_conso)
+
+M1_entree<-gls(f12,method="REML", 
+           data = data_conso_clean, na.action=na.omit)
+M2_entree <- lme(f12, 
+             random = ~1 | famille, 
+             data = data_conso_clean, method="REML", na.action=na.omit)
+anova(M1_entree, M2_entree)
+
+#effet famille significatif et pas sur les entrée
+
+M3_conso <- lme(f11, random = ~1 | famille, 
+             data = data_conso_clean, method="ML")
+
+d_M3 <- dredge(M3_conso) # test toutes les comparaisons
+d_M3
+
+M3_entree <- gls(f12, 
+             data = data_conso_clean, method="ML")
+
+d_M3 <- dredge(M3_entree) # test toutes les comparaisons
+d_M3
+
+# modèle final
+M3_conso<- lme(perc_vol~date+ecotype, random = ~1 | famille, 
+         data = data_conso_clean, method="REML",na.action=na.omit)
+M3_entree<- gls(entree_vol~date+ecotype, 
+         data = data_conso_clean, method="REML",na.action=na.omit)
+
+res <- residuals(M3_conso, type="normalized")
+fitted <- fitted(M3_conso)
+resfit <- bind_cols(res = res,
+                    fit = fitted,
+)
+
+plot_grid(nrow = 2, ncol = 2,
+          ggplot(as_tibble(res), aes(x = res)) +
+            geom_histogram(bins = 50,
+                           fill = "lightblue", color = "black")+
+            labs(title = "Histogramme des residus"),
+          ggplot(as_tibble(res), aes(sample = res)) +
+            stat_qq() +
+            stat_qq_line()+
+            labs(title = "Normal Q-Q Plot"),
+          ggplot(resfit, aes(y = res, x = fit)) +
+            geom_point()+
+            labs(title = "Valeurs ajustees"))
+
+res <- residuals(M3_entree, type="normalized")
+fitted <- fitted(M3_entree)
+resfit <- bind_cols(res = res,
+                    fit = fitted,
+)
+
+plot_grid(nrow = 2, ncol = 2,
+          ggplot(as_tibble(res), aes(x = res)) +
+            geom_histogram(bins = 50,
+                           fill = "lightblue", color = "black")+
+            labs(title = "Histogramme des residus"),
+          ggplot(as_tibble(res), aes(sample = res)) +
+            stat_qq() +
+            stat_qq_line()+
+            labs(title = "Normal Q-Q Plot"),
+          ggplot(resfit, aes(y = res, x = fit)) +
+            geom_point()+
+            labs(title = "Valeurs ajustees"))
+# interprétation du modèle
+
+Anova(M3_conso, type = "III")
+
+summary(M3_conso)
+
+r.squaredGLMM(M3_conso)
+
+emm_conso <- emmeans(M3_conso, pairwise ~ date + ecotype)
+print(summary(emm_conso))
+
+Anova(M3_entree, type = "III")
+
+summary(M3_entree)
+
+emm_entree <- emmeans(M3_entree, pairwise ~ date + ecotype)
+print(summary(emm_entree))
+
+```
+
+```{r  conso plot, echo=FALSE, fig.width=15, fig.height=10}
+
+data_conso_clean$condition[data_conso_clean$condition == "experimental"] <- "Challenge"
+data_conso_clean$condition[data_conso_clean$condition == "temoin"] <- "Control"
+
+data_conso_clean$ecotype[data_conso_clean$ecotype == "I"] <- "Intertidal"
+data_conso_clean$ecotype[data_conso_clean$ecotype == "S"] <- "Subtidal"
+data_conso_clean$ecotype[data_conso_clean$ecotype == "temoin"] <- "Control"
+
+ggplot(data = data_conso_clean,aes(x = condition, 
+                                y = entree_vol, 
+                                color = ecotype))+
+  geom_boxplot(outliers = FALSE)+
+  geom_point(position=position_jitterdodge())+
+  ylab('entree en volume phase chaude') +  
+  xlab('condition') +
+  theme_bw() +
+  theme(axis.title=element_text(size=16, colour="black"),
+        axis.title.x=element_text(size=16, colour="black", vjust=-0.1),
+        axis.title.y=element_text(size=16, colour="black"),
+        axis.text.x = element_text(size=12, colour="black"),
+        axis.text.y = element_text(size=12, colour="black"),
+        plot.title = element_text(size=16, colour="black"),
+        legend.title = element_blank(),
+        legend.text = element_text(size=16, colour="black"),
+        legend.background = element_rect(fill = NA , colour = NA))
+
+ggplot(data = data_conso_clean,aes(x = condition, 
+                                y = perc_vol, 
+                                color = ecotype))+
+  geom_boxplot(outliers = FALSE)+
+  geom_point(position=position_jitterdodge())+
+  ylab('Food intake (10e3 µm3.mL-1)') +  
+  xlab('Condition') +
+  scale_color_manual(values = c("#00BA38", "#F8766D", "#00BFC4"))+
+  theme_bw() +
+  theme(axis.title=element_text(size=16, colour="black"),
+        axis.title.x=element_text(size=16, colour="black", vjust=-0.1),
+        axis.title.y=element_text(size=16, colour="black"),
+        axis.text.x = element_text(size=12, colour="black"),
+        axis.text.y = element_text(size=12, colour="black"),
+        plot.title = element_text(size=16, colour="black"),
+        legend.title = element_blank(),
+        legend.text = element_text(size=16, colour="black"),
+        legend.background = element_rect(fill = NA , colour = NA),
+        legend.position = "bottom")
+```
+### Respiration rate during two days in intertidal conditions
+In our experiment the individuals have been put in conditions above their upper thermal tolerance. In this range of temperature the individuals are supposed to accumulate damages which can touch the DNA, protein denaturation or membrane fluidity. We didn't know exactly the shape of respond curve in this scope but differences between the first and the second stress can be related to biological metabolism. Mainly during the "high tide" period at 28°C which is the optimum condition for the species. 
+```{r initialize the flux data, include=FALSE}
+respi_raw_data <- read.table("./flux_métabolique/data_O2_consumption_dryweight.txt",
+                             header = TRUE,
+                             sep = "\t",
+                             dec = ".")
+
+respi_raw_data <- respi_raw_data %>%
+  mutate(run = as.factor(respi_raw_data$run))%>%
+  mutate(temperature = as.factor(respi_raw_data$temperature))%>%
+  mutate(ecotype = as.factor(respi_raw_data$population))%>%
+  mutate(cycle = as.factor(respi_raw_data$cycle)) %>%
+  mutate(family = paste0(respi_raw_data$population,respi_raw_data$individual))
+
+```
+
+```{r statistics flux data}
+respi_raw_data$ecotype <-relevel(respi_raw_data$ecotype, "subtidal")
+f2 <- formula(mean_O2_cons_mg_h_g~cycle*temperature*ecotype)
+
+M1_Rr<-gls(f2,method="REML", 
+           data = respi_raw_data, na.action=na.omit)
+M2_Rr <- lme(f2, 
+             random = ~1 | family, 
+             data = respi_raw_data, method="REML", na.action=na.omit)
+anova(M1_Rr, M2_Rr)
+
+#effet famille significatif
+
+M3_Rr <- lme(f2, 
+             random = ~1 | family, data = respi_raw_data, method="ML")
+
+d_M3 <- dredge(M3_Rr) # test toutes les comparaisons
+d_M3
+
+# modèle final
+M3_Rr<- lme(mean_O2_cons_mg_h_g ~ cycle*temperature+ecotype, 
+            random = ~1 | family,
+         data = respi_raw_data, method="REML",na.action=na.omit)
+
+res <- residuals(M3_Rr, type="normalized")
+fitted <- fitted(M3_Rr)
+resfit <- bind_cols(res = res,
+                    fit = fitted,
+)
+
+plot_grid(nrow = 2, ncol = 2,
+          ggplot(as_tibble(res), aes(x = res)) +
+            geom_histogram(bins = 50,
+                           fill = "lightblue", color = "black")+
+            labs(title = "Histogramme des residus"),
+          ggplot(as_tibble(res), aes(sample = res)) +
+            stat_qq() +
+            stat_qq_line()+
+            labs(title = "Normal Q-Q Plot"),
+          ggplot(resfit, aes(y = res, x = fit)) +
+            geom_point()+
+            labs(title = "Valeurs ajustees"))
+# interprétation du modèle
+
+Anova(M3_Rr, type = "III")
+
+summary(M3_Rr)
+
+r.squaredGLMM(M3_Rr)
+
+emm_Rr <- emmeans(M3_Rr, pairwise ~ cycle*temperature)
+print(summary(emm_Rr))
+```
+
+
+
+
+```{r respiration flux plot, echo=FALSE, fig.width=10, fig.height=7.5}
+
+respi_raw_data$population[respi_raw_data$population == "intertidal"] <- "Intertidal"
+respi_raw_data$population[respi_raw_data$population == "subtidal"] <- "Subtidal"
+
+
+ respi_raw_data %>%  ggplot(aes(x = as.factor(cycle), 
+                                y = mean_O2_cons_mg_h_g, 
+                                color = temperature))+
+  facet_wrap(~population)+
+  geom_boxplot(outliers = FALSE)+
+  geom_point(position=position_jitterdodge())+
+  ylab('O2 consumption (mg h-1 g-1)') +  
+  xlab('Cycle') +
+  theme_bw() +
+  scale_color_manual(values = c("#56B4E9", "#F15400")) +
+  theme(axis.title=element_text(size=16, colour="black"),
+        axis.title.x=element_text(size=16, colour="black", vjust=-0.1),
+        axis.title.y=element_text(size=16, colour="black"),
+        axis.text.x = element_text(size=16, colour="black"),
+        axis.text.y = element_text(size=16, colour="black"),
+        plot.title = element_text(size=16, colour="black"),
+        strip.text.x = element_text(size=16, colour="black"),
+        legend.title = element_blank(),
+        legend.text = element_text(size=16, colour="black"),
+        legend.background = element_rect(fill = NA , colour = NA),
+        legend.position = "bottom")
+
+
+```
+
+
+  
+```{r telomere data doawnload, include=FALSE}
+
+tel_data <- read.csv("/Users/antoinegradel/Desktop/pinctadapt/écophysiologie/qPCR/rTL_data_filtered_extracted.txt",
+                     sep = "\t",
+                     header = TRUE)
+
+tel_data_clean <- na.omit(tel_data)
+tel_data_clean <- tel_data_clean[tel_data_clean$Time == "T0"|
+                                  tel_data_clean$Time == "T21"|
+                                   tel_data_clean$Time == "T41", ]
+
+table(tel_data_clean$Time, tel_data_clean$ecotype)
+tel_data_clean$ecotype[tel_data_clean$ecotype =="S"] <- "subtidal"
+tel_data_clean$ecotype[tel_data_clean$ecotype =="I"] <- "intertidal"
+outliers_TEL <- boxplot(tel_data_clean$rTL,plot = TRUE)
+tel_data_clean <- tel_data_clean[tel_data_clean$rTL < min(outliers_TEL$out),]
+tel_data_clean <- tel_data_clean[tel_data_clean$rTL > min(tel_data_clean$rTL),]
+
+tel_data_clean_shape <- tel_data_clean%>%
+  select(ID, Time, Family, ecotype, rTL)%>%
+  mutate(Time = as.factor(Time))%>%
+  mutate(ecotype = as.factor(ecotype))%>%
+  mutate(Family = as.factor(Family))
+
+```
+
+```{r telomere statistics}
+f3 <- formula(rTL ~ ecotype * Time)
+
+M1_tel<-gls(f3,method="REML", 
+           data = tel_data_clean_shape, na.action=na.omit)
+M2_tel <- lme(f3, 
+             random = ~1 | Family, 
+             data = tel_data_clean_shape, method="REML", na.action=na.omit)
+anova(M1_tel, M2_tel)
+
+#effet famille significatif
+
+M3_tel <- gls(f3, data = tel_data_clean_shape, method="ML")
+
+d_M3 <- dredge(M3_tel) # test toutes les comparaisons
+d_M3
+
+# modèle final
+M3_tel<- gls((rTL) ~ ecotype + Time,  
+         data = tel_data_clean_shape, method="REML",na.action=na.omit)
+M3b_tel <- glmmTMB(rTL~ecotype+Time,
+                   data = tel_data_clean_shape, REML = TRUE, na.action=na.omit,
+                   family = lognormal(link = "log"))
+
+simulateResiduals(M3b_tel, plot = TRUE, n=500)
+res <- residuals(M3_tel, type="normalized")
+fitted <- fitted(M3_tel)
+resfit <- bind_cols(res = res,
+                    fit = fitted,
+)
+
+plot_grid(nrow = 2, ncol = 2,
+          ggplot(as_tibble(res), aes(x = res)) +
+            geom_histogram(bins = 50,
+                           fill = "lightblue", color = "black")+
+            labs(title = "Histogramme des residus"),
+          ggplot(as_tibble(res), aes(sample = res)) +
+            stat_qq() +
+            stat_qq_line()+
+            labs(title = "Normal Q-Q Plot"),
+          ggplot(resfit, aes(y = res, x = fit)) +
+            geom_point()+
+            labs(title = "Valeurs ajustees"))
+
+# interprétation du modèle
+
+Anova(M3b_tel, type = "III") 
+
+summary(M3b_tel)
+
+#r.squaredGLMM(M3b_tel)
+
+emm_tel <- emmeans(M3b_tel, pairwise ~ Time +ecotype)
+print(summary(emm_tel))
+
+```
+
+  
+```{r telomère plotting, echo=FALSE, fig.width=15, fig.height=10}
+
+levels(tel_data_clean_shape$ecotype) <- c("Intertidal","Subtidal")
+
+ggplot(data = tel_data_clean_shape, aes(x = Time, y = rTL,
+                                          color = ecotype))+
+  geom_boxplot(outliers = FALSE)+
+  geom_point(position=position_jitterdodge())+
+  ylab('rTL (Tl/S)') +  
+  xlab('Time (days)') +
+  theme_bw() +
+  annotate("text",
+           x = c(0.8,1.2,1.8,2.2,2.8,3.2),
+           y = 0,
+           label = c("","","ac","a","bc","c"),
+           color = c(rep(c("red", "turquoise"),3)),
+           size = 8) +
+  theme(axis.title=element_text(size=16, colour="black"),
+        axis.title.x=element_text(size=16, colour="black", vjust=-0.1),
+        axis.title.y=element_text(size=16, colour="black"),
+        axis.text.x = element_text(size=12, colour="black"),
+        axis.text.y = element_text(size=12, colour="black"),
+        plot.title = element_text(size=16, colour="black"),
+        legend.title = element_blank(),
+        legend.text = element_text(size=16, colour="black"),
+        legend.background = element_rect(fill = NA , colour = NA),
+        legend.position = "bottom")
+
+```
+  
+## Mitochondrial metabolism in intertidal thermal challenging condition
+
+### Intracellular mitochondrial quantity
+  
+  
+  
+```{r COI data doawnload, include=FALSE}
+
+COI_data <- read.csv("/Users/antoinegradel/Desktop/pinctadapt/écophysiologie/qPCR/rCOI_data_filtered_extracted.txt",
+                     sep = "\t",
+                     header = TRUE)
+
+COI_data_clean <- na.omit(COI_data)
+COI_data_clean <- COI_data_clean[COI_data_clean$Time != "B1/B2", ]
+
+table(COI_data_clean$Time, COI_data_clean$ecotype)
+COI_data_clean$ecotype[COI_data_clean$ecotype =="S"] <- "subtidal"
+COI_data_clean$ecotype[COI_data_clean$ecotype =="I"] <- "intertidal"
+
+outliers_COI <- boxplot(COI_data_clean$rCOI, plot = F, range = 5)
+COI_data_clean <- COI_data_clean[COI_data_clean$rCOI < min(outliers_COI$out),]
+table(COI_data_clean$Time, COI_data_clean$ecotype)
+
+COI_data_clean_shape <- COI_data_clean%>%
+  select(ID, Time, Family, ecotype, rCOI)%>%
+  mutate(Time_num = as.numeric(substr(Time,2,nchar(Time))))%>%
+  mutate(Time = as.factor(Time))%>%
+  mutate(ecotype = as.factor(ecotype))%>%
+  mutate(Family = as.factor(Family))
+
+COI_data_clean_shape$Time <- factor(COI_data_clean_shape$Time, c("T0", "T1", "T2", "T6", "T21", "T41"))
+#COI_data_clean_shape <- COI_data_clean_shape[COI_data_clean_shape$Time != "T2",]
+
+```
+
+```{r rCOI statistics}
+
+f4 <- formula(rCOI ~ ecotype*Time_num+ ecotype*I(Time_num^2))
+f4b <- formula(rCOI ~ ecotype*Time)
+
+M1_COI_num<-gls(f4,method="REML", 
+           data = COI_data_clean_shape, na.action=na.omit)
+M2_COI_num <- lme(f4, 
+             random = ~1 | Family, 
+             data = COI_data_clean_shape, method="REML", na.action=na.omit)
+anova(M1_COI_num, M2_COI_num)
+
+M1_COI_fac<-gls(f4b,method="REML", 
+           data = COI_data_clean_shape, na.action=na.omit)
+M2_COI_fac <- lme(f4b, 
+             random = ~1 | Family, 
+             data = COI_data_clean_shape, method="REML", na.action=na.omit)
+anova(M1_COI_fac, M2_COI_fac)
+#effet famille significatif
+#meilleur aic pour le model ave le temps en continue
+
+M3_COI <- lme(f4b, 
+             random = ~1 | Family, 
+             data = COI_data_clean_shape, method="ML")
+
+d_M3 <- dredge(M3_COI) # test toutes les comparaisons
+d_M3
+
+M3_COI <- lme(f4, 
+             random = ~1 | Family, 
+             data = COI_data_clean_shape, method="ML")
+
+d_M3 <- dredge(M3_COI) # test toutes les comparaisons
+d_M3
+
+# modèle final
+
+M3_COI<- lme(rCOI ~ I(Time_num^2)+ Time_num+ecotype, 
+             random = ~1 | Family,  
+         data = COI_data_clean_shape, method="REML",na.action=na.omit)
+
+res <- residuals(M3_COI, type="normalized")
+fitted <- fitted(M3_COI)
+resfit <- bind_cols(res = res,
+                    fit = fitted,
+)
+
+plot_grid(nrow = 2, ncol = 2,
+          ggplot(as_tibble(res), aes(x = res)) +
+            geom_histogram(bins = 50,
+                           fill = "lightblue", color = "black")+
+            labs(title = "Histogramme des residus"),
+          ggplot(as_tibble(res), aes(sample = res)) +
+            stat_qq() +
+            stat_qq_line()+
+            labs(title = "Normal Q-Q Plot"),
+          ggplot(resfit, aes(y = res, x = fit)) +
+            geom_point()+
+            labs(title = "Valeurs ajustees"))
+# interprétation du modèle
+
+Anova(M3_COI, type = "III")
+
+summary(M3_COI)
+
+r.squaredGLMM(M3_COI)
+
+```
+
+ 
+```{r pcrCOI plotting, echo=FALSE, fig.width=15, fig.height=10}
+ggplot(data = COI_data_clean_shape, aes(x = Time, y = rCOI,
+                                  color = ecotype))+
+ geom_boxplot(outlier.size = 0)+
+ geom_point(position=position_jitterdodge())+
+  ylab('rCOI (COI/S)') +  
+  xlab('Time (days)') +
+  theme_bw() +
+  theme(axis.title=element_text(size=16, colour="black"),
+        axis.title.x=element_text(size=16, colour="black", vjust=-0.1),
+        axis.title.y=element_text(size=16, colour="black"),
+        axis.text.x = element_text(size=12, colour="black"),
+        axis.text.y = element_text(size=12, colour="black"),
+        plot.title = element_text(size=16, colour="black"),
+        legend.title = element_blank(),
+        legend.text = element_text(size=16, colour="black"),
+        legend.background = element_rect(fill = NA , colour = NA))
+
+
+ggplot(data = COI_data_clean_shape, aes(x = (Time_num), y = rCOI
+                                  ))+
+  stat_smooth(method = "lm", formula = y ~ x + I(x^2), size = 1, se = TRUE)+
+  geom_boxplot(aes(fill= as.factor(Time_num)))+
+  theme_light() +
+  theme(axis.title=element_text(size=16, colour="black"),
+        axis.title.x=element_text(size=16, colour="black", vjust=-0.1),
+        axis.title.y=element_text(size=16, colour="black"),
+        axis.text.x = element_text(size=12, colour="black"),
+        axis.text.y = element_text(size=12, colour="black"),
+        plot.title = element_text(size=16, colour="black"),
+        legend.title = element_blank(),
+        legend.position = "none",
+        legend.text = element_text(size=16, colour="black"),
+        legend.background = element_rect(fill = NA , colour = NA))+
+  scale_fill_manual(values = rep("white", 6))+
+  xlab("Time (days)")+
+  ylab("rCOI (COI/S)")
+
+ggplot(data = COI_data_clean_shape, aes(x = (Time_num), y = rCOI, color=ecotype
+                                  ))+
+  stat_smooth(method = "lm", formula = y ~ x + I(x^2), size = 1, se = TRUE)+
+  geom_boxplot(aes(fill= as.factor(Time_num)))+
+  theme_light() +
+  theme(axis.title=element_text(size=16, colour="black"),
+        axis.title.x=element_text(size=16, colour="black", vjust=-0.1),
+        axis.title.y=element_text(size=16, colour="black"),
+        axis.text.x = element_text(size=12, colour="black"),
+        axis.text.y = element_text(size=12, colour="black"),
+        plot.title = element_text(size=16, colour="black"),
+        legend.title = element_blank(),
+        legend.text = element_text(size=16, colour="black"),
+        legend.background = element_rect(fill = NA , colour = NA))+
+  scale_fill_manual(values = rep("white", 6))+
+  xlab("Time (days)")+
+  ylab("rCOI (COI/S)")
+```
+
+
+
+### Oroboros parameters : the quality of mitochondria
+
+
+```{r oroboros data import, include=FALSE}
+
+o2k_data <- read.table("/Users/antoinegradel/Desktop/pinctadapt/écophysiologie/oroboros_statistiques/oroboros_data_filtered_OXce.txt",
+                       header = TRUE,
+                       dec = ",",
+                       sep = "\t")
+o2k_data$f_time <- as.factor(o2k_data$time_approx)
+o2k_data_36 <- o2k_data[,c(1:4,7,14:18)]
+o2k_data_36_clean <- na.omit(o2k_data_36)
+o2k_data_36_clean$family <- as.factor(o2k_data_36_clean$family)
+o2k_data_36_clean$ecotype <- as.factor(o2k_data_36_clean$ecotype)
+
+o2k_data_28 <- o2k_data[,c(1:4,6,10:13,18)]
+o2k_data_28_clean <- na.omit(o2k_data_28)
+o2k_data_28_clean$family <- as.factor(o2k_data_28_clean$family)
+o2k_data_28_clean$ecotype <- as.factor(o2k_data_28_clean$ecotype)
+
+o2k_data_delta <- na.omit(o2k_data,c(1:4,6,7,10:18)) %>%
+  mutate(RCR_delta = X36_RCR-X28_RCR) %>%
+  mutate(OXPHOS_delta = X36_protein_mg.mL-X28_protein_mg.mL) %>%
+  mutate(LEAK_delta = X36_LEAK_pmol_mL-X28_LEAK_pmol_mL) %>%
+  mutate(prot_delta = X36_protein_mg.mL-X28_protein_mg.mL) %>%
+  mutate(oxce_delta = Oxce_36 - Oxce_28) %>%
+  select(c("ID","family","ecotype",
+           "time_approx", "time_exact","f_time",
+           "OXPHOS_delta", "LEAK_delta","RCR_delta", "oxce_delta",
+           "prot_delta"))
+
+```
+
+#### OXPHOS: Oxidative phosphorilation
+
+the oxidative phosphorilation is the step of the respiratory chain which finally permit to stock energy into a covalent bond of adenosine to a third phosphate group. The molecule of ATP will them permit to the organism to proceed metabolism reactions.
+
+
+```{r oxphos statistic}
+f5 <- formula(X36_OXPHOSCytC_pmol_mL ~ ecotype*time_approx+ecotype*I(time_approx^2))
+f5b <- formula(X36_OXPHOSCytC_pmol_mL ~ ecotype*f_time)
+
+M1_oxphos<-gls(f5b,method="REML", 
+           data = o2k_data_36_clean, na.action=na.omit)
+M2_oxphos <- lme(f5b, 
+             random = ~1 | family, 
+             data = o2k_data_36_clean, method="REML", na.action=na.omit)
+M2b_oxphos <- lme(f5b, 
+             random = ~1 | X36_protein_mg.mL, 
+             data = o2k_data_36_clean, method="REML", na.action=na.omit)
+anova(M1_oxphos, M2_oxphos)
+anova(M1_oxphos, M2b_oxphos)
+
+#selection
+M3_oxphos <- lme(f5b, 
+             random = ~1 | X36_protein_mg.mL, 
+             data = o2k_data_36_clean, method="ML")
+
+d_M3 <- dredge(M3_oxphos) # test toutes les comparaisons
+d_M3
+
+# modèle final
+
+M3_oxphos<- lme(X36_OXPHOSCytC_pmol_mL ~ f_time +ecotype, 
+             random = ~1 | X36_protein_mg.mL,
+         data = o2k_data_36_clean, method="REML",na.action=na.omit)
+
+res <- residuals(M3_oxphos, type="normalized")
+fitted <- fitted(M3_oxphos)
+resfit <- bind_cols(res = res,
+                    fit = fitted,
+)
+
+plot_grid(nrow = 2, ncol = 2,
+          ggplot(as_tibble(res), aes(x = res)) +
+            geom_histogram(bins = 50,
+                           fill = "lightblue", color = "black")+
+            labs(title = "Histogramme des residus"),
+          ggplot(as_tibble(res), aes(sample = res)) +
+            stat_qq() +
+            stat_qq_line()+
+            labs(title = "Normal Q-Q Plot"),
+          ggplot(resfit, aes(y = res, x = fit)) +
+            geom_point()+
+            labs(title = "Valeurs ajustees"))
+# interprétation du modèle
+
+Anova(M3_oxphos, type = "III")
+
+summary(M3_oxphos)
+
+r.squaredGLMM(M3_oxphos)
+
+emm_time <- emmeans(M3_oxphos, pairwise ~ f_time)
+print(summary(emm_time))
+
+
+```
+
+
+
+```{r OXPHOS plotting, echo=FALSE, fig.width=15, fig.height=10}
+
+oxphos <- ggplot(data = o2k_data_36_clean, aes(x = f_time, y = X36_OXPHOSCytC_pmol_mL/X36_protein_mg.mL))+
+  geom_boxplot(outliers = FALSE)+
+  geom_jitter(width = 0.1)+
+#  geom_point(position=position_jitterdodge())+
+  ylab('OXPHOS 
+respiration flux (pmol.mg-1.s-1)') +  
+  xlab('Time (days)') +
+  theme_bw() +
+  annotate("text",
+           x = c(1,2,3,4,5),
+           y = -40,
+           label = c("ab","a","a","b","b"),
+           color = "black",
+           size = 10) +
+  theme(axis.title=element_text(size=16, colour="black"),
+        axis.title.x=element_text(size=16, colour="black", vjust=-0.1),
+        axis.title.y=element_text(size=16, colour="black"),
+        axis.text.x = element_text(size=12, colour="black"),
+        axis.text.y = element_text(size=12, colour="black"),
+        plot.title = element_text(size=16, colour="black"),
+        legend.title = element_blank(),
+        legend.text = element_text(size=16, colour="black"),
+        legend.background = element_rect(fill = NA , colour = NA))+
+  scale_y_continuous(breaks = c(seq(0,600,200)), limits = c(-50,750))
+
+plot(oxphos)
+```
+
+####LEAK: Mitochondrial proton leak
+
+Respiratory chain is an active proton transporter which permit to increase the concentration of proton into the inter-membranaire space of the mitochondria. these proton will them, thank to the ATP synthase, permit the synthesis of ATP from ADP by going back to the mitochondria matrix.  Nevertheless due to the osmosis a passive flux of proton called leak occur and induce a loss of energy. This parameter of mitochondrial respiration is link to the phospholipid compound of the membrane.
+
+```{r leak statistic}
+f5 <- formula(X36_LEAK_pmol_mL ~ ecotype*time_approx+ecotype*I(time_approx^2))
+f5b <- formula(X36_LEAK_pmol_mL ~ ecotype*f_time)
+
+M1_leak<-gls(f5b,method="REML", 
+           data = o2k_data_36_clean, na.action=na.omit)
+M2_leak <- lme(f5b, 
+             random = ~1 | family, 
+             data = o2k_data_36_clean, method="REML", na.action=na.omit)
+M2b_leak <- lme(f5b, 
+             random = ~1 | X36_protein_mg.mL, 
+             data = o2k_data_36_clean, method="REML", na.action=na.omit)
+anova(M1_leak, M2_leak)
+anova(M1_leak, M2b_leak)
+
+#selection
+M3_leak <- lme(f5b, 
+             random = ~1 | X36_protein_mg.mL, 
+             data = o2k_data_36_clean, method="ML")
+
+d_M3 <- dredge(M3_leak) # test toutes les comparaisons
+d_M3
+
+# modèle final
+
+M3_leak <- lme(X36_LEAK_pmol_mL ~ f_time + ecotype, 
+             random = ~1 | X36_protein_mg.mL,
+         data = o2k_data_36_clean, method="REML",na.action=na.omit)
+
+res <- residuals(M3_leak, type="normalized")
+fitted <- fitted(M3_leak)
+resfit <- bind_cols(res = res,
+                    fit = fitted,
+)
+
+plot_grid(nrow = 2, ncol = 2,
+          ggplot(as_tibble(res), aes(x = res)) +
+            geom_histogram(bins = 50,
+                           fill = "lightblue", color = "black")+
+            labs(title = "Histogramme des residus"),
+          ggplot(as_tibble(res), aes(sample = res)) +
+            stat_qq() +
+            stat_qq_line()+
+            labs(title = "Normal Q-Q Plot"),
+          ggplot(resfit, aes(y = res, x = fit)) +
+            geom_point()+
+            labs(title = "Valeurs ajustees"))
+# interprétation du modèle
+
+Anova(M3_leak, type = "III")
+
+summary(M3_leak)
+
+r.squaredGLMM(M3_leak)
+
+emm_time <- emmeans(M3_leak, pairwise ~ f_time)
+print(summary(emm_time))
+
+```
+
+```{r LEAK plotting, echo=FALSE, fig.width=15, fig.height=10}
+
+leak <- ggplot(data = o2k_data_36_clean, aes(x = f_time, y =  X36_LEAK_pmol_mL/X36_protein_mg.mL
+                                          ))+
+  geom_boxplot(outliers = FALSE)+
+  geom_jitter(width = 0.1)+
+#  geom_point(position=position_jitterdodge())+
+  ylab('LEAK
+respiration flux (pmol.mg-1.s-1)') +  
+  xlab('Time (days)') +
+  theme_bw() +
+  annotate("text",
+           x = c(1,2,3,4,5),
+           y = -40,
+           label = c("n.s.","ab","a","bc","c"),
+           color = "black",
+           size = 10) +
+  theme(axis.title=element_text(size=16, colour="black"),
+        axis.title.x=element_text(size=16, colour="black", vjust=-0.1),
+        axis.title.y=element_text(size=16, colour="black"),
+        axis.text.x = element_text(size=12, colour="black"),
+        axis.text.y = element_text(size=12, colour="black"),
+        plot.title = element_text(size=16, colour="black"),
+        legend.title = element_blank(),
+        legend.text = element_text(size=16, colour="black"),
+        legend.background = element_rect(fill = NA , colour = NA))+
+  scale_y_continuous(breaks = c(seq(0,600,200)), limits = c(-50,750))
+plot(leak)
+```
+  
+
+####RCR: Respiratory Control Ratio
+
+
+```{r RCR statistic}
+f6 <- formula(X36_RCR ~ ecotype*time_approx+ecotype*I(time_approx^2))
+f6b <- formula(X36_RCR ~ ecotype*f_time)
+
+M1_RCR<-gls(f6b,method="REML", 
+           data = o2k_data_36_clean, na.action=na.omit)
+M2_RCR <- lme(f6b, 
+             random = ~1 | family, 
+             data = o2k_data_36_clean, method="REML", na.action=na.omit)
+M2b_RCR <- lme(f6b, 
+             random = ~1 | X36_protein_mg.mL, 
+             data = o2k_data_36_clean, method="REML", na.action=na.omit)
+anova(M1_RCR, M2_RCR)
+anova(M1_RCR, M2b_RCR)
+
+#selection
+M3_RCR <- gls(f6b, 
+          #   random = ~1 | X36_protein_mg.mL, 
+             data = o2k_data_36_clean, method="ML")
+
+d_M3 <- dredge(M3_RCR) # test toutes les comparaisons
+d_M3
+
+# modèle final
+
+M3_RCR <- gls(log10(X36_RCR) ~ f_time + ecotype, 
+         data = o2k_data_36_clean, method="REML",na.action=na.omit)
+
+res <- residuals(M3_RCR, type="normalized")
+fitted <- fitted(M3_RCR)
+resfit <- bind_cols(res = res,
+                    fit = fitted,
+)
+
+plot_grid(nrow = 2, ncol = 2,
+          ggplot(as_tibble(res), aes(x = res)) +
+            geom_histogram(bins = 50,
+                           fill = "lightblue", color = "black")+
+            labs(title = "Histogramme des residus"),
+          ggplot(as_tibble(res), aes(sample = res)) +
+            stat_qq() +
+            stat_qq_line()+
+            labs(title = "Normal Q-Q Plot"),
+          ggplot(resfit, aes(y = res, x = fit)) +
+            geom_point()+
+            labs(title = "Valeurs ajustees"))
+# interprétation du modèle
+
+Anova(M3_RCR, type = "III")
+
+summary(M3_RCR)
+
+emm_time <- emmeans(M3_RCR, pairwise ~ f_time)
+print(summary(emm_time))
+
+```
+
+```{r RCR plotting, echo=FALSE, fig.width=15, fig.height=10}
+
+RCR <- ggplot(data = o2k_data_36_clean, aes(x = f_time, y =  X36_RCR,
+                                          ))+
+  geom_boxplot(outliers = FALSE)+
+  geom_jitter()+
+  ylab('Respiration Control Ratio') +  
+  xlab('Time (days)') +
+  theme_bw() +
+  annotate("text",
+           x = c(1,2,3,4,5),
+           y = 0,
+           label = c("ab","a","b","a","a"),
+           color = "black",
+           size = 10) +
+  theme(axis.title=element_text(size=16, colour="black"),
+        axis.title.x=element_text(size=16, colour="black", vjust=-0.1),
+        axis.title.y=element_text(size=16, colour="black"),
+        axis.text.x = element_text(size=12, colour="black"),
+        axis.text.y = element_text(size=12, colour="black"),
+        plot.title = element_text(size=16, colour="black"),
+        legend.title = element_blank(),
+        legend.text = element_text(size=16, colour="black"),
+        legend.background = element_rect(fill = NA , colour = NA))
+
+```
+  
+####Oxce: effect of olygomycin
+```{r Oxce statistic}
+f7 <- formula(Oxce_36 ~ ecotype*time_approx+ecotype*I(time_approx^2))
+f7b <- formula(Oxce_36 ~ ecotype*f_time)
+
+M1_oxce<-gls(f7b,method="REML", 
+           data = o2k_data_36_clean, na.action=na.omit)
+M2_oxce <- lme(f7b, 
+             random = ~1 | family, 
+             data = o2k_data_36_clean, method="REML", na.action=na.omit)
+M2b_oxce <- lme(f7b, 
+             random = ~1 | X36_protein_mg.mL, 
+             data = o2k_data_36_clean, method="REML", na.action=na.omit)
+anova(M1_oxce, M2_oxce)
+anova(M1_oxce, M2b_oxce)
+
+#selection
+M3_oxce <- gls(f7b, 
+             data = o2k_data_36_clean, method="ML")
+
+d_M3 <- dredge(M3_oxce) # test toutes les comparaisons
+d_M3
+
+# modèle final
+
+M3_oxce <- gls(Oxce_36 ~ f_time + ecotype, 
+         data = o2k_data_36_clean, method="REML",na.action=na.omit)
+
+res <- residuals(M3_oxce, type="normalized")
+fitted <- fitted(M3_oxce)
+resfit <- bind_cols(res = res,
+                    fit = fitted,
+)
+
+plot_grid(nrow = 2, ncol = 2,
+          ggplot(as_tibble(res), aes(x = res)) +
+            geom_histogram(bins = 50,
+                           fill = "lightblue", color = "black")+
+            labs(title = "Histogramme des residus"),
+          ggplot(as_tibble(res), aes(sample = res)) +
+            stat_qq() +
+            stat_qq_line()+
+            labs(title = "Normal Q-Q Plot"),
+          ggplot(resfit, aes(y = res, x = fit)) +
+            geom_point()+
+            labs(title = "Valeurs ajustees"))
+# interprétation du modèle
+
+Anova(M3_oxce, type = "III")
+
+summary(M3_oxce)
+
+emm_time <- emmeans(M3_oxce, pairwise ~ f_time)
+print(summary(emm_time))
+```
+ 
+```{r oxce plotting, echo=FALSE, fig.width=15, fig.height=10}
+
+oxce <- ggplot(data = o2k_data_36_clean, aes(x = f_time, y =  Oxce_36))+
+  geom_boxplot(outliers = FALSE)+
+  geom_jitter(width = 0.1)+
+  ylab('Oligomycin effect') +  
+  xlab('Time (days)') +
+  theme_bw() +
+  annotate("text",
+          x = c(1,2,3,4,5),
+          y = -0,
+          label = c("ab","a","b","ab","a"),
+          color = "black",
+          size = 10) +
+  theme(axis.title=element_text(size=16, colour="black"),
+        axis.title.x=element_text(size=16, colour="black", vjust=-0.1),
+        axis.title.y=element_text(size=16, colour="black"),
+        axis.text.x = element_text(size=12, colour="black"),
+        axis.text.y = element_text(size=12, colour="black"),
+        plot.title = element_text(size=16, colour="black"),
+        legend.title = element_blank(),
+        legend.text = element_text(size=16, colour="black"),
+        legend.background = element_rect(fill = NA , colour = NA))
+
+plot(oxce)
+```
+```{r plot oroboros statistic article}
+
+ggarrange(oxphos, leak, oxce, RCR, ncol = 2, nrow = 2, labels = c("A", "B", "C", "D"))
+
+```
+####delta: observation of the differences with control flux at 28
+
+
+```{r LEAK delta statistic}
+o2k_data_delta$eOXPHOS_delta <- exp(o2k_data_delta$OXPHOS_delta)
+
+
+f8 <- formula(LEAK_delta ~ ecotype*time_approx+ecotype*I(time_approx^2))
+f8b <- formula(LEAK_delta ~ ecotype*f_time)
+
+M1_del_leak<-gls(f8b,method="REML", 
+           data = o2k_data_delta, na.action=na.omit)
+M2_del_leak <- lme(f8b, 
+             random = ~1 | family, 
+             data = o2k_data_delta, method="REML", na.action=na.omit)
+M2b_del_leak <- lme(f8b, 
+             random = ~1 | prot_delta, 
+             data = o2k_data_delta, method="REML", na.action=na.omit)
+
+anova(M1_del_leak, M2_del_leak)
+anova(M1_del_leak, M2b_del_leak)
+
+#selection
+M3_del_leak <- gls(f8b, 
+     #        random = ~1 | prot_delta, 
+             data = o2k_data_delta, method="ML")
+
+d_M3 <- dredge(M3_del_leak) # test toutes les comparaisons
+d_M3
+
+# modèle final
+
+M3_del_leak <- lme(LEAK_delta ~ f_time+ecotype , 
+             random = ~1 | prot_delta,
+         data = o2k_data_delta, method="REML",na.action=na.omit)
+
+res <- residuals(M3_del_leak, type="normalized")
+fitted <- fitted(M3_del_leak)
+resfit <- bind_cols(res = res,
+                    fit = fitted,
+)
+
+plot_grid(nrow = 2, ncol = 2,
+          ggplot(as_tibble(res), aes(x = res)) +
+            geom_histogram(bins = 50,
+                           fill = "lightblue", color = "black")+
+            labs(title = "Histogramme des residus"),
+          ggplot(as_tibble(res), aes(sample = res)) +
+            stat_qq() +
+            stat_qq_line()+
+            labs(title = "Normal Q-Q Plot"),
+          ggplot(resfit, aes(y = res, x = fit)) +
+            geom_point()+
+            labs(title = "Valeurs ajustees"))
+# interprétation du modèle
+
+Anova(M3_del_leak, type = "III")
+
+summary(M3_del_leak)
+
+emm_time <- emmeans(M3_del_leak, pairwise ~ f_time)
+print(summary(emm_time))
+```
+  
+  
+  
+```{r delta LEAK plotting, echo=FALSE, fig.width=15, fig.height=10}
+
+LEAK_delta <- ggplot(data = o2k_data_delta, aes(x = f_time, y =  LEAK_delta))+
+  geom_boxplot(outliers = FALSE)+
+  geom_jitter()+
+  ylab('∆ LEAK flux (pmol.mg-1.s-1)') +  
+  xlab('Time (days)') +
+  theme_bw() +
+  annotate("text",
+           x = c(3,5),
+           y = -10,
+           label = c("a","b"),
+           color = "black",
+           size = 10,
+           fontface= "italic") +
+  annotate("text",
+           x = c(1,2,4),
+           y = -10,
+           label = c("n.s"),
+           color = "black",
+           size = 10,)+
+  theme(axis.title=element_text(size=16, colour="black"),
+        axis.title.x=element_text(size=16, colour="black", vjust=-0.1),
+        axis.title.y=element_text(size=16, colour="black"),
+        axis.text.x = element_text(size=12, colour="black"),
+        axis.text.y = element_text(size=12, colour="black"),
+        plot.title = element_text(size=16, colour="black"),
+        legend.title = element_blank(),
+        legend.text = element_text(size=16, colour="black"),
+        legend.background = element_rect(fill = NA , colour = NA))
+
+plot(LEAK_delta)
+```
+  
+  
+#### delta OXPHOS / delta RCR
+
+
+```{r OXPHOS delta statistic}
+
+f9<- formula(OXPHOS_delta ~ ecotype*time_approx+ecotype*I(time_approx^2))
+f9b <- formula(OXPHOS_delta ~ ecotype*f_time)
+
+M1_del_oxphos<-gls(f9b,method="REML", 
+           data = o2k_data_delta, na.action=na.omit)
+M2_del_oxphos <- lme(f9b, 
+             random = ~1 | family, 
+             data = o2k_data_delta, method="REML", na.action=na.omit)
+M2b_del_oxphos <- lme(f9b, 
+             random = ~1 | prot_delta, 
+             data = o2k_data_delta, method="REML", na.action=na.omit)
+
+anova(M1_del_oxphos, M2_del_oxphos)
+anova(M1_del_oxphos, M2b_del_oxphos)
+
+#selection
+M3_del_oxphos <- lme(f9b, 
+             random = ~1 | prot_delta, 
+             data = o2k_data_delta, method="ML")
+
+d_M3 <- dredge(M3_del_oxphos) # test toutes les comparaisons
+d_M3
+
+# modèle final
+
+M3_del_oxphos <- lme(log(OXPHOS_delta+1) ~ f_time*ecotype, 
+             random = ~1 | prot_delta,
+         data = o2k_data_delta, method="REML",na.action=na.omit)
+
+
+res <- residuals(M3_del_oxphos, type="normalized")
+fitted <- fitted(M3_del_oxphos)
+resfit <- bind_cols(res = res,
+                    fit = fitted,
+)
+
+plot_grid(nrow = 2, ncol = 2,
+          ggplot(as_tibble(res), aes(x = res)) +
+            geom_histogram(bins = 50,
+                           fill = "lightblue", color = "black")+
+            labs(title = "Histogramme des residus"),
+          ggplot(as_tibble(res), aes(sample = res)) +
+            stat_qq() +
+            stat_qq_line()+
+            labs(title = "Normal Q-Q Plot"),
+          ggplot(resfit, aes(y = res, x = fit)) +
+            geom_point()+
+            labs(title = "Valeurs ajustees"))
+# interprétation du modèle
+
+Anova(M3_del_oxphos, type = "III")
+
+summary(M3_del_oxphos)
+
+emm_time <- emmeans(M3_del_oxphos, pairwise ~ ecotype)
+print(summary(emm_time))
+
+```
+
+```{r delta OXPHOS plotting, echo=FALSE, fig.width=15, fig.height=10}
+
+ggplot(data = o2k_data_delta, aes(x = f_time, y =  OXPHOS_delta,
+                                          color = ecotype))+
+  geom_boxplot(outliers = FALSE)+
+  geom_point(position=position_jitterdodge())+
+  ylab('delta OXPHOS') +  
+  xlab('Time (days)') +
+  theme_bw() +
+  theme(axis.title=element_text(size=16, colour="black"),
+        axis.title.x=element_text(size=16, colour="black", vjust=-0.1),
+        axis.title.y=element_text(size=16, colour="black"),
+        axis.text.x = element_text(size=12, colour="black"),
+        axis.text.y = element_text(size=12, colour="black"),
+        plot.title = element_text(size=16, colour="black"),
+        legend.title = element_blank(),
+        legend.text = element_text(size=16, colour="black"),
+        legend.background = element_rect(fill = NA , colour = NA))
+
+```
+
+```{r oxce delta statistic}
+
+f10<- formula(oxce_delta ~ ecotype*time_approx+ecotype*I(time_approx^2))
+f10b <- formula(oxce_delta ~ ecotype*f_time)
+
+M1_del_oxce<-gls(f10b,method="REML", 
+           data = o2k_data_delta, na.action=na.omit)
+M2_del_oxce <- lme(f10b, 
+             random = ~1 | family, 
+             data = o2k_data_delta, method="REML", na.action=na.omit)
+M2b_del_oxce <- lme(f10b, 
+             random = ~1 | prot_delta, 
+             data = o2k_data_delta, method="REML", na.action=na.omit)
+
+anova(M1_del_oxce, M2_del_oxce)
+anova(M1_del_oxce, M2b_del_oxce)
+
+#selection
+M3_del_oxce <- gls(f10b, 
+        #     random = ~1 | prot_delta, 
+             data = o2k_data_delta, method="ML")
+
+d_M3 <- dredge(M3_del_oxce) # test toutes les comparaisons
+d_M3
+
+# modèle final
+
+M3_del_oxce <- gls(oxce_delta ~ f_time +ecotype, 
+        #     random = ~1 | prot_delta,
+         data = o2k_data_delta, method="REML",na.action=na.omit)
+
+res <- residuals(M3_del_oxce, type="normalized")
+fitted <- fitted(M3_del_oxce)
+resfit <- bind_cols(res = res,
+                    fit = fitted,
+)
+
+plot_grid(nrow = 2, ncol = 2,
+          ggplot(as_tibble(res), aes(x = res)) +
+            geom_histogram(bins = 50,
+                           fill = "lightblue", color = "black")+
+            labs(title = "Histogramme des residus"),
+          ggplot(as_tibble(res), aes(sample = res)) +
+            stat_qq() +
+            stat_qq_line()+
+            labs(title = "Normal Q-Q Plot"),
+          ggplot(resfit, aes(y = res, x = fit)) +
+            geom_point()+
+            labs(title = "Valeurs ajustees"))
+# interprétation du modèle
+
+Anova(M3_del_oxce, type = "III")
+
+summary(M3_del_oxce)
+
+emm_time <- emmeans(M3_del_oxce, pairwise ~ f_time)
+print(summary(emm_time))
+
+```
+
+```{r delta oxce plotting, echo=FALSE, fig.width=15, fig.height=10}
+
+oxce_delta <- ggplot(data = o2k_data_delta, aes(x = f_time, y =  oxce_delta))+
+  geom_boxplot(outliers = FALSE)+
+  geom_jitter(width = 0.1)+
+  ylab('∆ Oligomycin effect') +  
+  xlab('Time (days)') +
+  theme_bw() +
+  annotate("text",
+          x = c(1,2,3,4,5),
+          y = -0.7,
+          label = c("ab","a","b","ab","ab"),
+          color = "black",
+          size = 10) +
+  theme(axis.title=element_text(size=16, colour="black"),
+        axis.title.x=element_text(size=16, colour="black", vjust=-0.1),
+        axis.title.y=element_text(size=16, colour="black"),
+        axis.text.x = element_text(size=12, colour="black"),
+        axis.text.y = element_text(size=12, colour="black"),
+        plot.title = element_text(size=16, colour="black"),
+        legend.title = element_blank(),
+        legend.text = element_text(size=16, colour="black"),
+        legend.background = element_rect(fill = NA , colour = NA))
+
+
+plot(oxce_delta)
+```
+
+```{r rcr delta statistic}
+
+ggarrange(LEAK_delta, oxce_delta, labels = c("A", "B"))
+
+```
+
+```{r rcr delta statistic}
+
+f15<- formula(RCR_delta ~ ecotype*time_approx+ecotype*I(time_approx^2))
+f15b <- formula(RCR_delta ~ ecotype*f_time)
+
+M1_del_RCR<-gls(f15b,method="REML", 
+           data = o2k_data_delta, na.action=na.omit)
+M2_del_RCR <- lme(f15b, 
+             random = ~1 | family, 
+             data = o2k_data_delta, method="REML", na.action=na.omit)
+M2b_del_RCR  <- lme(f15b, 
+             random = ~1 | prot_delta, 
+             data = o2k_data_delta, method="REML", na.action=na.omit)
+
+anova(M1_del_RCR , M2_del_RCR )
+anova(M1_del_RCR , M2b_del_RCR )
+
+#selection
+M3_del_RCR  <- gls(f15b, 
+        #     random = ~1 | prot_delta, 
+             data = o2k_data_delta, method="ML")
+
+d_M3 <- dredge(M3_del_RCR ) # test toutes les comparaisons
+d_M3
+
+# modèle final
+
+M3_del_RCR  <- gls(RCR_delta ~ f_time +ecotype, 
+        #     random = ~1 | prot_delta,
+         data = o2k_data_delta, method="REML",na.action=na.omit)
+
+res <- residuals(M3_del_RCR, type="normalized")
+fitted <- fitted(M3_del_RCR)
+resfit <- bind_cols(res = res,
+                    fit = fitted,
+)
+
+plot_grid(nrow = 2, ncol = 2,
+          ggplot(as_tibble(res), aes(x = res)) +
+            geom_histogram(bins = 50,
+                           fill = "lightblue", color = "black")+
+            labs(title = "Histogramme des residus"),
+          ggplot(as_tibble(res), aes(sample = res)) +
+            stat_qq() +
+            stat_qq_line()+
+            labs(title = "Normal Q-Q Plot"),
+          ggplot(resfit, aes(y = res, x = fit)) +
+            geom_point()+
+            labs(title = "Valeurs ajustees"))
+# interprétation du modèle
+
+Anova(M3_del_RCR, type = "III")
+
+summary(M3_del_RCR)
+
+emm_time <- emmeans(M3_del_RCR, pairwise ~ f_time)
+print(summary(emm_time))
+
+```
+
+```{r delta RCR plotting, echo=FALSE, fig.width=15, fig.height=10}
+
+ggplot(data = o2k_data_delta, aes(x = f_time, y =  RCR_delta))+
+  geom_boxplot(outliers = FALSE)+
+  geom_jitter()+
+  ylab('delta RCR') +  
+  xlab('Time (days)') +
+  theme_bw() +
+  theme(axis.title=element_text(size=16, colour="black"),
+        axis.title.x=element_text(size=16, colour="black", vjust=-0.1),
+        axis.title.y=element_text(size=16, colour="black"),
+        axis.text.x = element_text(size=12, colour="black"),
+        axis.text.y = element_text(size=12, colour="black"),
+        plot.title = element_text(size=16, colour="black"),
+        legend.title = element_blank(),
+        legend.text = element_text(size=16, colour="black"),
+        legend.background = element_rect(fill = NA , colour = NA))
+
+```
